@@ -47,7 +47,7 @@ var (
 	outputFolder      = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
 	environment       = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
 	exitCode          = 0
-	version           = "0.1.0"
+	version           = "0.1.1"
 	stdout            = log.New(os.Stdout, "", log.LstdFlags)
 	stderr            = log.New(os.Stderr, "", log.LstdFlags)
 )
@@ -93,6 +93,7 @@ func main() {
 
 	utils.ConsoleOutput(fmt.Sprintf("Output Folder: %v", *outputFolder), stdout)
 	utils.ConsoleOutput(fmt.Sprintf("Using Certificate URL: %v", *certURL), stdout)
+	utils.ConsoleOutput(fmt.Sprintf("Environment: %v", *environment), stdout)
 
 	utils.ConsoleOutput("Getting authorizer", stdout)
 	os.Setenv("AZURE_ENVIRONMENT", *environment)
