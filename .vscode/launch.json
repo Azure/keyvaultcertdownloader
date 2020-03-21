@@ -5,6 +5,7 @@
     "version": "0.2.0",
     "configurations": [
 
+
         {
             "name": "Launch-Windows",
             "type": "go",
@@ -16,8 +17,17 @@
             },
             "args": [
                 "--certurl","https://pmc-anf-release-kv.vault.azure.net/vm-cert2",
-                "--outputfolder","c:\\temp"
-            ]
+                "--outputfolder","c:\\temp",
+                "--environment","AzurePublicCloud"
+            ],
+            "useApiV1": false,
+            "dlvLoadConfig": {
+                "followPointers": true,
+                "maxVariableRecurse": 1,
+                "maxStringLen": 500,
+                "maxArrayValues": 500,
+                "maxStructFields": -1
+            }
         }
     ]
 }

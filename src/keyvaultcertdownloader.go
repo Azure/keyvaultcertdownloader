@@ -29,24 +29,27 @@ import (
 )
 
 const (
-	ERR_AUTHORIZER             = 2
-	ERR_INVALID_ARGUMENT       = 3
-	ERR_INVALID_URL            = 4
-	ERR_GET_AKV_CERT_SECRET    = 5
-	ERR_GET_PEM_PRIVATE_KEY    = 6
-	ERR_GET_PEM_CERTIFICATE    = 7
-	ERR_CREATE_PEM_FILE        = 8
-	ERR_X509_THUMBPRINT        = 9
-	ERR_OUTPUTFOLDER_NOT_FOUND = 10
+	ERR_AUTHORIZER                = 2
+	ERR_INVALID_ARGUMENT          = 3
+	ERR_INVALID_URL               = 4
+	ERR_GET_AKV_CERT_SECRET       = 5
+	ERR_GET_PEM_PRIVATE_KEY       = 6
+	ERR_GET_PEM_CERTIFICATE       = 7
+	ERR_CREATE_PEM_FILE           = 8
+	ERR_X509_THUMBPRINT           = 9
+	ERR_OUTPUTFOLDER_NOT_FOUND    = 10
+	ERR_INVALID_AZURE_ENVIRONMENT = 11
 )
 
 var (
-	certURL      = flag.String("certurl", "", "certificate URL, e.g. \"https://mykeyvault.vault.azure.net/mycertificate\"")
-	outputFolder = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
-	exitCode     = 0
-	version      = "0.1.0"
-	stdout       = log.New(os.Stdout, "", log.LstdFlags)
-	stderr       = log.New(os.Stderr, "", log.LstdFlags)
+	validEnvironments = []string{"AZUREPUBLICCLOUD", "AZUREUSGOVERNMENTCLOUD", "AZUREGERMANCLOUD", "AZURECHINACLOUD"}
+	certURL           = flag.String("certurl", "", "certificate URL, e.g. \"https://mykeyvault.vault.azure.net/mycertificate\"")
+	outputFolder      = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
+	environment       = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
+	exitCode          = 0
+	version           = "0.1.0"
+	stdout            = log.New(os.Stdout, "", log.LstdFlags)
+	stderr            = log.New(os.Stderr, "", log.LstdFlags)
 )
 
 func main() {
@@ -70,6 +73,14 @@ func main() {
 		return
 	}
 
+	// Checks if valid cloud environment was passed
+	_, found := utils.FindInSlice(validEnvironments, strings.ToUpper(*environment))
+	if !found {
+		utils.ConsoleOutput(fmt.Sprintf("<error> invalid azure environment (%v), valid environments are: %v", *environment, validEnvironments), stderr)
+		exitCode = ERR_INVALID_AZURE_ENVIRONMENT
+		return
+	}
+
 	// Creates URL object
 	u, err := url.Parse(*certURL)
 	if err != nil {
@@ -84,6 +95,7 @@ func main() {
 	utils.ConsoleOutput(fmt.Sprintf("Using Certificate URL: %v", *certURL), stdout)
 
 	utils.ConsoleOutput("Getting authorizer", stdout)
+	os.Setenv("AZURE_ENVIRONMENT", *environment)
 	authorizer, err := kvauth.NewAuthorizerFromEnvironment()
 	if err != nil {
 		utils.ConsoleOutput(fmt.Sprintf("<error> unable to create vault authorizer: %v\n", err), stderr)
