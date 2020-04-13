@@ -46,8 +46,9 @@ var (
 	certURL           = flag.String("certurl", "", "certificate URL, e.g. \"https://mykeyvault.vault.azure.net/mycertificate\"")
 	outputFolder      = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
 	environment       = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
+	cmdlineversion    = flag.Bool("version", false, "shows current tool version")
 	exitCode          = 0
-	version           = "0.1.1"
+	version           = "0.1.2"
 	stdout            = log.New(os.Stdout, "", log.LstdFlags)
 	stderr            = log.New(os.Stderr, "", log.LstdFlags)
 )
@@ -60,9 +61,16 @@ func main() {
 
 	flag.Parse()
 
-	if len(os.Args[1:]) < 2 {
+	if len(os.Args[1:]) < 1 {
 		utils.ConsoleOutput(fmt.Sprintf("<error> invalid number of arguments, please execute %v -h or --help for more information", os.Args[0]), stderr)
 		exitCode = ERR_INVALID_ARGUMENT
+		return
+	}
+
+	// Checks if version output is needed
+	if *cmdlineversion == true {
+		fmt.Println(version)
+		exitCode = 0
 		return
 	}
 
@@ -171,7 +179,9 @@ func main() {
 
 func exit(cntx context.Context, exitCode int) {
 	if exitCode == 0 {
-		utils.ConsoleOutput("Execution successfully completed", stdout)
+		if !*cmdlineversion {
+			utils.ConsoleOutput("Execution successfully completed", stdout)
+		}
 	}
 }
 

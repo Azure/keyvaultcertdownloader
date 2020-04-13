@@ -3,6 +3,8 @@
 Source code for a tool that performs downloads managed certificates from KeyVault in PEM file format, these certificates can
 be self-signed or issued by an Azure KeyVault integrated CA (e.g. Digicert).
 
+> Note: This tool is provided as sample code purposes only, no support of any kind will be provided, for more details, please see [LICENSE](./LICENSE).
+
 ## Requirements
 * Azure Subscription
 * Azure Key Vault
