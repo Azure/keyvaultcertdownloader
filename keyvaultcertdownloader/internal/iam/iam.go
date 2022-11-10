@@ -16,8 +16,8 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/microsoft/keyvaultcertdownloader/src/internal/models"
-	"github.com/microsoft/keyvaultcertdownloader/src/internal/utils"
+	"internal/models"
+	"internal/utils"
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure/auth"

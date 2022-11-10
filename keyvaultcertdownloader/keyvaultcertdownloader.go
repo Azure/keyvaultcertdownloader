@@ -22,9 +22,10 @@ import (
 	"os"
 	"strings"
 
+	"internal/utils"
+
 	"github.com/Azure/azure-sdk-for-go/profiles/latest/keyvault/keyvault"
 	kvauth "github.com/Azure/azure-sdk-for-go/services/keyvault/auth"
-	"github.com/microsoft/keyvaultcertdownloader/src/internal/utils"
 	"software.sslmate.com/src/go-pkcs12"
 )
 
@@ -48,7 +49,7 @@ var (
 	environment       = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
 	cmdlineversion    = flag.Bool("version", false, "shows current tool version")
 	exitCode          = 0
-	version           = "0.1.2"
+	version           = "0.2.0"
 	stdout            = log.New(os.Stdout, "", log.LstdFlags)
 	stderr            = log.New(os.Stderr, "", log.LstdFlags)
 )

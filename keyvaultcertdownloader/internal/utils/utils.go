@@ -14,7 +14,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/microsoft/keyvaultcertdownloader/src/internal/models"
+	"internal/models"
 )
 
 // PrintHeader prints a header message
