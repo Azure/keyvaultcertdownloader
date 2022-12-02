@@ -16,9 +16,13 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azcertificates"
 	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azsecrets"
+	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/confidential"
 	gpkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
@@ -126,10 +130,76 @@ func GetPrivateKeyFromPEMBlocks(blocks interface{}) (privateKey interface{}, err
 }
 
 //
-//!SECTION - SDK dependent functions
+//!SECTION - Azcore SDK related functions
+// Source: https://github.com/Azure/azure-workload-identity/tree/main/examples
 //
 
-//!SECTION - Internal functions
+// clientAssertionCredential authenticates an application with assertions provided by a callback function.
+type clientAssertionCredential struct {
+	assertion, file string
+	client          confidential.Client
+	lastRead        time.Time
+}
+
+// clientAssertionCredentialOptions contains optional parameters for ClientAssertionCredential.
+type clientAssertionCredentialOptions struct {
+	azcore.ClientOptions
+}
+
+// NewClientAssertionCredential constructs a clientAssertionCredential. Pass nil for options to accept defaults.
+func NewClientAssertionCredential(tenantID, clientID, authorityHost, file string, options *clientAssertionCredentialOptions) (*clientAssertionCredential, error) {
+	c := &clientAssertionCredential{file: file}
+
+	if options == nil {
+		options = &clientAssertionCredentialOptions{}
+	}
+
+	cred := confidential.NewCredFromAssertionCallback(
+		func(ctx context.Context, _ confidential.AssertionRequestOptions) (string, error) {
+			return c.getAssertion(ctx)
+		},
+	)
+
+	client, err := confidential.New(clientID, cred, confidential.WithAuthority(fmt.Sprintf("%s%s/oauth2/token", authorityHost, tenantID)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create confidential client: %w", err)
+	}
+	c.client = client
+
+	return c, nil
+}
+
+// GetToken implements the TokenCredential interface
+func (c *clientAssertionCredential) GetToken(ctx context.Context, opts policy.TokenRequestOptions) (azcore.AccessToken, error) {
+	// get the token from the confidential client
+	token, err := c.client.AcquireTokenByCredential(ctx, opts.Scopes)
+	if err != nil {
+		return azcore.AccessToken{}, err
+	}
+
+	return azcore.AccessToken{
+		Token:     token.AccessToken,
+		ExpiresOn: token.ExpiresOn,
+	}, nil
+}
+
+// getAssertion reads the assertion from the file and returns it
+// if the file has not been read in the last 5 minutes
+func (c *clientAssertionCredential) getAssertion(context.Context) (string, error) {
+	if now := time.Now(); c.lastRead.Add(5 * time.Minute).Before(now) {
+		content, err := os.ReadFile(c.file)
+		if err != nil {
+			return "", err
+		}
+		c.assertion = string(content)
+		c.lastRead = now
+	}
+	return c.assertion, nil
+}
+
+//
+//!SECTION - Keyvault SDK related functions
+//
 
 func getAKVCertificateBundle(cntx context.Context, client *azcertificates.Client, certURL url.URL) (azcertificates.CertificateBundle, error) {
 	cert, err := client.GetCertificate(cntx, certURL.Path, "", nil)
@@ -139,8 +209,6 @@ func getAKVCertificateBundle(cntx context.Context, client *azcertificates.Client
 
 	return cert.CertificateBundle, nil
 }
-
-//!SECTION - Public functions
 
 // GetAKVCertificate - Gets a certificate from AKV
 func GetAKVCertificate(cntx context.Context, client *azsecrets.Client, certURL url.URL) (azsecrets.SecretBundle, error) {

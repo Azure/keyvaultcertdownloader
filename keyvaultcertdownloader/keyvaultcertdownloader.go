@@ -22,6 +22,7 @@ import (
 	"internal/corehelper"
 	"internal/utils"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azcertificates"
 	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azsecrets"
@@ -44,12 +45,11 @@ const (
 var (
 	validEnvironments = []string{"AZUREPUBLICCLOUD", "AZUREUSGOVERNMENTCLOUD", "AZUREGERMANCLOUD", "AZURECHINACLOUD"}
 	certURL           = flag.String("certurl", "", "certificate URL, e.g. \"https://mykeyvault.vault.azure.net/mycertificate\"")
-	keyVaultUrl       = ""
 	outputFolder      = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
 	environment       = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
 	cmdlineversion    = flag.Bool("version", false, "shows current tool version")
 	exitCode          = 0
-	version           = "0.2.0"
+	version           = "1.0.0"
 	stdout            = log.New(os.Stdout, "", log.LstdFlags)
 	stderr            = log.New(os.Stderr, "", log.LstdFlags)
 )
@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// Checks if version output is needed
-	if *cmdlineversion == true {
+	if *cmdlineversion {
 		fmt.Println(version)
 		exitCode = 0
 		return
@@ -105,44 +105,72 @@ func main() {
 	utils.ConsoleOutput(fmt.Sprintf("Using Certificate URL: %v", *certURL), stdout)
 	utils.ConsoleOutput(fmt.Sprintf("Environment: %v", *environment), stdout)
 
-	//utils.ConsoleOutput("Checking if this session needs to rely on AD Workload Identity webhook", stdout)
-	// client := keyvault.New()
-	// var authorizer autorest.Authorizer
+	utils.ConsoleOutput("Checking if this session needs to rely on AD Workload Identity webhook", stdout)
+	var cred azcore.TokenCredential
 
 	tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
 	if tokenFilePath == "" {
-		// utils.ConsoleOutput("Getting authorizer", stdout)
-		// os.Setenv("AZURE_ENVIRONMENT", *environment)
-		// authorizer, err = kvauth.NewAuthorizerFromEnvironment()
-		// if err != nil {
-		// 	utils.ConsoleOutput(fmt.Sprintf("<error> unable to create vault authorizer: %v\n", err), stderr)
-		// 	exitCode = ERR_AUTHORIZER
-		// 	return
-		// }
-
-		// utils.ConsoleOutput("Creating KeyVault base client", stdout)
-
+		// Not running within a container with azwi webhook configured
+		utils.ConsoleOutput("Obtaining credentials", stdout)
+		cred, err = azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
 	} else {
 
-	}
+		// NOTE: following block is based on azure workload identity sample:
+		//       https://github.dev/Azure/azure-workload-identity/blob/main/examples/msal-net/akvdotnet/TokenCredential.cs
+		//
 
-	// client.Authorizer = authorizer
-	utils.ConsoleOutput("Obtaining credentials", stdout)
-	cred, err := azidentity.NewDefaultAzureCredential(nil)
-	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
-		exitCode = ERR_CREDENTIALS
-		return
+		// Azure AD Workload Identity webhook will inject the following env vars
+		// 	AZURE_CLIENT_ID with the clientID set in the service account annotation
+		// 	AZURE_TENANT_ID with the tenantID set in the service account annotation. If not defined, then
+		// 	the tenantID provided via azure-wi-webhook-config for the webhook will be used.
+		// 	AZURE_FEDERATED_TOKEN_FILE is the service account token path
+		// 	AZURE_AUTHORITY_HOST is the AAD authority hostname
+		clientID := os.Getenv("AZURE_CLIENT_ID")
+		tenantID := os.Getenv("AZURE_TENANT_ID")
+		tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+		authorityHost := os.Getenv("AZURE_AUTHORITY_HOST")
+
+		if clientID == "" {
+			utils.ConsoleOutput("AZURE_CLIENT_ID environment variable is not set", stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+		if tenantID == "" {
+			utils.ConsoleOutput("AZURE_TENANT_ID environment variable is not set", stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+		if authorityHost == "" {
+			utils.ConsoleOutput("AZURE_AUTHORITY_HOST environment variable is not set", stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+
+		cred, err = corehelper.NewClientAssertionCredential(tenantID, clientID, authorityHost, tokenFilePath, nil)
+		if err != nil {
+			utils.ConsoleOutput(fmt.Sprintf("<error> failed to create client assertion credential: %v\n", err), stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
 	}
 
 	utils.ConsoleOutput("Creating clients", stdout)
 	azsecretsClient, err := azsecrets.NewClient(keyVaultUrl, cred, nil)
 	if err != nil {
-		log.Fatalf("failed to create azsecrets client: %v", err)
+		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azsecrets client: %v\n", err), stderr)
+		exitCode = ERR_CREDENTIALS
+		return
 	}
 	azcertsClient, err := azcertificates.NewClient(keyVaultUrl, cred, nil)
 	if err != nil {
-		log.Fatalf("failed to create azcertificates client: %v", err)
+		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azcertificates client: %v\n", err), stderr)
+		exitCode = ERR_CREDENTIALS
+		return
 	}
 
 	utils.ConsoleOutput("Getting certificate thumbprint", stdout)
