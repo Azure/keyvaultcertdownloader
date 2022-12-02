@@ -131,32 +131,32 @@ func GetPrivateKeyFromPEMBlocks(blocks interface{}) (privateKey interface{}, err
 
 //!SECTION - Internal functions
 
-func getAKVCertificateBundle(cntx context.Context, client azcertificates.Client, certURL url.URL) (azcertificates.CertificateBundle, error) {
+func getAKVCertificateBundle(cntx context.Context, client *azcertificates.Client, certURL url.URL) (azcertificates.CertificateBundle, error) {
 	cert, err := client.GetCertificate(cntx, certURL.Path, "", nil)
 	if err != nil {
 		return azcertificates.CertificateBundle{}, err
 	}
 
-	return cert, nil
+	return cert.CertificateBundle, nil
 }
 
 //!SECTION - Public functions
 
 // GetAKVCertificate - Gets a certificate from AKV
-func GetAKVCertificate(cntx context.Context, client azsecrets.Client, certURL url.URL) (azsecrets.GetSecretRespose, error) {
+func GetAKVCertificate(cntx context.Context, client *azsecrets.Client, certURL url.URL) (azsecrets.SecretBundle, error) {
 	certSecret, err := client.GetSecret(cntx, certURL.Path, "", nil)
 	if err != nil {
 		return azsecrets.SecretBundle{}, err
 	}
-	return certSecret, nil
+	return certSecret.SecretBundle, nil
 }
 
 // GetAKVCertThumbprint - Gets thumbprint from bundle
-func GetAKVCertThumbprint(cntx context.Context, client azcertificates.Client, certURL url.URL) (thumbprint string, err error) {
+func GetAKVCertThumbprint(cntx context.Context, client *azcertificates.Client, certURL url.URL) (thumbprint string, err error) {
 	certBundle, err := getAKVCertificateBundle(cntx, client, certURL)
 	if err != nil {
 		return "", fmt.Errorf("unable to get certificate bundle: %v", err)
 	}
 
-	return *certBundle.X509Thumbprint, nil
+	return string(certBundle.X509Thumbprint), nil
 }

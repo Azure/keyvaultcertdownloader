@@ -37,14 +37,12 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/keyvault/azcertificates v0.8.0
 	github.com/Azure/azure-sdk-for-go/sdk/keyvault/azsecrets v0.11.0
 	internal/corehelper v1.0.0
-	internal/iam v1.0.0
 	internal/models v1.0.0
 	internal/utils v1.0.0
 )
 
 replace (
 	internal/corehelper => ./internal/corehelper
-	internal/iam => ./internal/iam
 	internal/models => ./internal/models
 	internal/utils => ./internal/utils
 )
