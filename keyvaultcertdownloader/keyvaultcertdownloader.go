@@ -11,10 +11,7 @@ package main
 
 import (
 	"context"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/pem"
 	"flag"
 	"fmt"
 	"log"
@@ -22,11 +19,13 @@ import (
 	"os"
 	"strings"
 
+	"internal/corehelper"
 	"internal/utils"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/latest/keyvault/keyvault"
-	kvauth "github.com/Azure/azure-sdk-for-go/services/keyvault/auth"
-	"software.sslmate.com/src/go-pkcs12"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azcertificates"
+	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azsecrets"
 )
 
 const (
@@ -40,6 +39,7 @@ const (
 	ERR_X509_THUMBPRINT           = 9
 	ERR_OUTPUTFOLDER_NOT_FOUND    = 10
 	ERR_INVALID_AZURE_ENVIRONMENT = 11
+	ERR_CREDENTIALS               = 12
 )
 
 var (
@@ -49,7 +49,7 @@ var (
 	environment       = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
 	cmdlineversion    = flag.Bool("version", false, "shows current tool version")
 	exitCode          = 0
-	version           = "0.2.0"
+	version           = "1.0.0"
 	stdout            = log.New(os.Stdout, "", log.LstdFlags)
 	stderr            = log.New(os.Stderr, "", log.LstdFlags)
 )
@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// Checks if version output is needed
-	if *cmdlineversion == true {
+	if *cmdlineversion {
 		fmt.Println(version)
 		exitCode = 0
 		return
@@ -97,6 +97,7 @@ func main() {
 		exitCode = ERR_INVALID_URL
 		return
 	}
+	keyVaultUrl := fmt.Sprintf("%v://%v/", u.Scheme, u.Hostname())
 
 	utils.PrintHeader(fmt.Sprintf("keyvaultcertdownloader - Downloads a certificate from Azure KeyVault saving as PEM file - v%v", version))
 
@@ -104,21 +105,76 @@ func main() {
 	utils.ConsoleOutput(fmt.Sprintf("Using Certificate URL: %v", *certURL), stdout)
 	utils.ConsoleOutput(fmt.Sprintf("Environment: %v", *environment), stdout)
 
-	utils.ConsoleOutput("Getting authorizer", stdout)
-	os.Setenv("AZURE_ENVIRONMENT", *environment)
-	authorizer, err := kvauth.NewAuthorizerFromEnvironment()
+	utils.ConsoleOutput("Checking if this session needs to rely on AD Workload Identity webhook", stdout)
+	var cred azcore.TokenCredential
+
+	tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+	if tokenFilePath == "" {
+		// Not running within a container with azwi webhook configured
+		utils.ConsoleOutput("Obtaining credentials", stdout)
+		cred, err = azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+	} else {
+
+		// NOTE: following block is based on azure workload identity sample:
+		//       https://github.dev/Azure/azure-workload-identity/blob/main/examples/msal-net/akvdotnet/TokenCredential.cs
+		//
+
+		// Azure AD Workload Identity webhook will inject the following env vars
+		// 	AZURE_CLIENT_ID with the clientID set in the service account annotation
+		// 	AZURE_TENANT_ID with the tenantID set in the service account annotation. If not defined, then
+		// 	the tenantID provided via azure-wi-webhook-config for the webhook will be used.
+		// 	AZURE_FEDERATED_TOKEN_FILE is the service account token path
+		// 	AZURE_AUTHORITY_HOST is the AAD authority hostname
+		clientID := os.Getenv("AZURE_CLIENT_ID")
+		tenantID := os.Getenv("AZURE_TENANT_ID")
+		tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+		authorityHost := os.Getenv("AZURE_AUTHORITY_HOST")
+
+		if clientID == "" {
+			utils.ConsoleOutput("AZURE_CLIENT_ID environment variable is not set", stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+		if tenantID == "" {
+			utils.ConsoleOutput("AZURE_TENANT_ID environment variable is not set", stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+		if authorityHost == "" {
+			utils.ConsoleOutput("AZURE_AUTHORITY_HOST environment variable is not set", stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+
+		cred, err = corehelper.NewClientAssertionCredential(tenantID, clientID, authorityHost, tokenFilePath, nil)
+		if err != nil {
+			utils.ConsoleOutput(fmt.Sprintf("<error> failed to create client assertion credential: %v\n", err), stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+	}
+
+	utils.ConsoleOutput("Creating clients", stdout)
+	azsecretsClient, err := azsecrets.NewClient(keyVaultUrl, cred, nil)
 	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> unable to create vault authorizer: %v\n", err), stderr)
-		exitCode = ERR_AUTHORIZER
+		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azsecrets client: %v\n", err), stderr)
+		exitCode = ERR_CREDENTIALS
+		return
+	}
+	azcertsClient, err := azcertificates.NewClient(keyVaultUrl, cred, nil)
+	if err != nil {
+		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azcertificates client: %v\n", err), stderr)
+		exitCode = ERR_CREDENTIALS
 		return
 	}
 
-	utils.ConsoleOutput("Creating KeyVault base client", stdout)
-	client := keyvault.New()
-	client.Authorizer = authorizer
-
 	utils.ConsoleOutput("Getting certificate thumbprint", stdout)
-	x509Thumbprint, err := getAKVCertThumbprint(cntx, client, *u)
+	x509Thumbprint, err := corehelper.GetAKVCertThumbprint(cntx, azcertsClient, *u)
 	if err != nil {
 		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
 		exitCode = ERR_X509_THUMBPRINT
@@ -139,7 +195,7 @@ func main() {
 
 	// Get cert as secret
 	utils.ConsoleOutput("Getting certificate as secret", stdout)
-	certAKV, err := getAKVCertificate(cntx, client, *u)
+	certAKV, err := corehelper.GetAKVCertificate(cntx, azsecretsClient, *u)
 	if err != nil {
 		utils.ConsoleOutput(fmt.Sprintf("<error> unable to get certificate: %v\n", err), stderr)
 		exitCode = ERR_GET_AKV_CERT_SECRET
@@ -151,26 +207,26 @@ func main() {
 	// Getting PEM Blocks
 	var blocks interface{}
 	if *certAKV.ContentType == "application/x-pkcs12" {
-		blocks, _ = getBlocksFromPCKS12(*certAKV.Value)
+		blocks, _ = corehelper.GetBlocksFromPCKS12(*certAKV.Value)
 	} else if *certAKV.ContentType == "application/x-pem-file" {
-		blocks = getBlocksFromPEM([]byte(*certAKV.Value), nil)
+		blocks = corehelper.GetBlocksFromPEM([]byte(*certAKV.Value), nil)
 	}
 
-	privateKey, err := getPrivateKeyFromPEMBlocks(blocks)
+	privateKey, err := corehelper.GetPrivateKeyFromPEMBlocks(blocks)
 	if err != nil {
 		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
 		exitCode = ERR_GET_PEM_PRIVATE_KEY
 		return
 	}
 
-	certificate, err := getCertificateFromPEMBLocks(blocks)
+	certificate, err := corehelper.GetCertificateFromPEMBLocks(blocks)
 	if err != nil {
 		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
 		exitCode = ERR_GET_PEM_CERTIFICATE
 		return
 	}
 
-	err = writePEMfile(pemFileName, certificate, privateKey)
+	err = corehelper.WritePEMfile(pemFileName, certificate, privateKey)
 	if err != nil {
 		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
 		exitCode = ERR_CREATE_PEM_FILE
@@ -184,129 +240,4 @@ func exit(cntx context.Context, exitCode int) {
 			utils.ConsoleOutput("Execution successfully completed", stdout)
 		}
 	}
-}
-
-func getBlocksFromPEM(data []byte, blocks []*pem.Block) []*pem.Block {
-	block, rest := pem.Decode(data)
-	if block == nil {
-		return blocks
-	}
-
-	blocks = append(blocks, block)
-	return getBlocksFromPEM(rest, blocks)
-}
-
-func getBlocksFromPCKS12(certString string) (blocks []*pem.Block, err error) {
-	decodedData, _ := base64.StdEncoding.DecodeString(certString)
-
-	// Decoding PKCS12 blob
-	privateKey, firstCert, certList, err := pkcs12.DecodeChain(decodedData, "")
-	if err != nil {
-		return nil, err
-	}
-
-	// Extracting private key and creating private key pem.block
-	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		return nil, err
-	}
-	blocks = append(blocks, &pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyBytes})
-
-	// Checking if first certificate is non-CA cert and converting to pem.block if true
-	if !firstCert.IsCA {
-		blocks = append(blocks, &pem.Block{Type: "CERTIFICATE", Bytes: firstCert.Raw})
-		return blocks, nil
-	}
-
-	// Iterating over the caCerts list since we cannot assume that cert returned by pkcs12.DecodeChain
-	// is the leaf certificate
-	for _, cert := range certList {
-		if !cert.IsCA {
-			blocks = append(blocks, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
-			break
-		}
-	}
-
-	return blocks, nil
-}
-
-func getAKVCertificateBundle(cntx context.Context, client keyvault.BaseClient, certURL url.URL) (keyvault.CertificateBundle, error) {
-	cert, err := client.GetCertificate(cntx, fmt.Sprintf("https://%v", certURL.Host), strings.Replace(certURL.Path, "/", "", 1), "")
-	if err != nil {
-		return keyvault.CertificateBundle{}, err
-	}
-
-	return cert, nil
-}
-
-func getAKVCertificate(cntx context.Context, client keyvault.BaseClient, certURL url.URL) (keyvault.SecretBundle, error) {
-	certSecret, err := client.GetSecret(cntx, fmt.Sprintf("https://%v", certURL.Host), strings.Replace(certURL.Path, "/", "", 1), "")
-	if err != nil {
-		return keyvault.SecretBundle{}, err
-	}
-
-	return certSecret, nil
-}
-
-func writePEMfile(filename string, certificate, privateKey interface{}) error {
-	f, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("unable to create pem file %v: %v", filename, err)
-	}
-	defer f.Close()
-
-	err = pem.Encode(f, &pem.Block{Type: certificate.(*pem.Block).Type, Bytes: certificate.(*pem.Block).Bytes})
-	if err != nil {
-		return fmt.Errorf("an error ocurred writting certificate to pem file %v:", err)
-	}
-
-	err = pem.Encode(f, &pem.Block{Type: privateKey.(*pem.Block).Type, Bytes: privateKey.(*pem.Block).Bytes})
-	if err != nil {
-		return fmt.Errorf("an error ocurred writting private key to pem file %v:", err)
-	}
-
-	return nil
-}
-
-func getCertificateFromPEMBLocks(blocks interface{}) (certificate interface{}, err error) {
-	for _, b := range blocks.([]*pem.Block) {
-		if strings.Contains(b.Type, "CERTIFICATE") {
-			x509cert, err := x509.ParseCertificate(b.Bytes)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse certificate: %v", err)
-			}
-			if x509cert.IsCA == false {
-				certificate = b
-				break
-			}
-		}
-	}
-	if certificate == nil {
-		return nil, fmt.Errorf("unable to find non-CA certificate")
-	}
-
-	return certificate, nil
-}
-
-func getPrivateKeyFromPEMBlocks(blocks interface{}) (privateKey interface{}, err error) {
-	for _, b := range blocks.([]*pem.Block) {
-		if strings.Contains(b.Type, "PRIVATE KEY") {
-			privateKey = b
-			break
-		}
-	}
-	if privateKey == nil {
-		return nil, fmt.Errorf("unable to find private key")
-	}
-
-	return privateKey, nil
-}
-
-func getAKVCertThumbprint(cntx context.Context, client keyvault.BaseClient, certURL url.URL) (thumbprint string, err error) {
-	certBundle, err := getAKVCertificateBundle(cntx, client, certURL)
-	if err != nil {
-		return "", fmt.Errorf("unable to get certificate bundle: %v", err)
-	}
-
-	return *certBundle.X509Thumbprint, nil
 }
