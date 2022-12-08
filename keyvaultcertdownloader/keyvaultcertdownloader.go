@@ -40,18 +40,21 @@ const (
 	ERR_OUTPUTFOLDER_NOT_FOUND    = 10
 	ERR_INVALID_AZURE_ENVIRONMENT = 11
 	ERR_CREDENTIALS               = 12
+	ERR_INVALID_CREDENTIAL_ARGS   = 13
 )
 
 var (
-	validEnvironments = []string{"AZUREPUBLICCLOUD", "AZUREUSGOVERNMENTCLOUD", "AZUREGERMANCLOUD", "AZURECHINACLOUD"}
-	certURL           = flag.String("certurl", "", "certificate URL, e.g. \"https://mykeyvault.vault.azure.net/mycertificate\"")
-	outputFolder      = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
-	environment       = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
-	cmdlineversion    = flag.Bool("version", false, "shows current tool version")
-	exitCode          = 0
-	version           = "1.0.0"
-	stdout            = log.New(os.Stdout, "", log.LstdFlags)
-	stderr            = log.New(os.Stderr, "", log.LstdFlags)
+	validEnvironments        = []string{"AZUREPUBLICCLOUD", "AZUREUSGOVERNMENTCLOUD", "AZUREGERMANCLOUD", "AZURECHINACLOUD"}
+	certURL                  = flag.String("certurl", "", "certificate URL, e.g. \"https://mykeyvault.vault.azure.net/mycertificate\"")
+	outputFolder             = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
+	environment              = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
+	cmdlineversion           = flag.Bool("version", false, "shows current tool version")
+	managedIdentityId        = flag.String("managed-identity-id", "", "uses user managed identities (accepts resource id or client id)")
+	useSystemManagedIdentity = flag.Bool("use-system-managed-identity", false, "uses system managed identity")
+	exitCode                 = 0
+	version                  = "1.1.0"
+	stdout                   = log.New(os.Stdout, "", log.LstdFlags)
+	stderr                   = log.New(os.Stderr, "", log.LstdFlags)
 )
 
 func main() {
@@ -90,6 +93,13 @@ func main() {
 		return
 	}
 
+	// Checks if both user managed identity and system managed identities were set
+	if *managedIdentityId != "" && *useSystemManagedIdentity {
+		utils.ConsoleOutput("<error> invalid authentication options, user and system assigned managed identities arguments cannot be used at the same time", stderr)
+		exitCode = ERR_INVALID_CREDENTIAL_ARGS
+		return
+	}
+
 	// Creates URL object
 	u, err := url.Parse(*certURL)
 	if err != nil {
@@ -112,7 +122,31 @@ func main() {
 	if tokenFilePath == "" {
 		// Not running within a container with azwi webhook configured
 		utils.ConsoleOutput("Obtaining credentials", stdout)
-		cred, err = azidentity.NewDefaultAzureCredential(nil)
+
+		if *managedIdentityId == "" && !*useSystemManagedIdentity {
+			cred, err = azidentity.NewDefaultAzureCredential(nil)
+		} else if *useSystemManagedIdentity {
+			cred, err = azidentity.NewManagedIdentityCredential(nil)
+		} else if *managedIdentityId != "" {
+			opts := azidentity.ManagedIdentityCredentialOptions{}
+
+			if strings.Contains(*managedIdentityId, "/") {
+				opts = azidentity.ManagedIdentityCredentialOptions{
+					ID: azidentity.ResourceID(*managedIdentityId),
+				}
+			} else {
+				opts = azidentity.ManagedIdentityCredentialOptions{
+					ID: azidentity.ClientID(*managedIdentityId),
+				}
+			}
+
+			cred, err = azidentity.NewManagedIdentityCredential(&opts)
+		} else {
+			utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
+			exitCode = ERR_CREDENTIALS
+			return
+		}
+
 		if err != nil {
 			utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
 			exitCode = ERR_CREDENTIALS

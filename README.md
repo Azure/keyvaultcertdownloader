@@ -1,7 +1,6 @@
 # keyvaultcertdownloader
 
-Source code for a tool that performs downloads managed certificates from KeyVault in PEM file format, these certificates can
-be self-signed or issued by an Azure KeyVault integrated CA (e.g. Digicert).
+Source code for a tool that performs downloads managed certificates from KeyVault in PEM file format, these certificates can be self-signed or issued by an Azure KeyVault integrated CA (e.g. Digicert).
 
 > Note: This tool is provided as sample code purposes only, no support of any kind will be provided, for more details, please see [LICENSE](./LICENSE).
 
@@ -37,7 +36,11 @@ Finally, if the certificate from is new, it then extracts the certificate and pr
 
 * **certulr** - This is the KeyVault URL followed by the certificate name. E.g. https://pmc-anf-release-kv.vault.azure.net/vm-cert
 * **outputfolder** - Folder where the PEM file with the Certificate and its Private Key will be saved, it must exist beforehand, the tool will not create it and will also not manage permissions on the files
-
+* **environment** - Valid azure cloud environments: [AZUREPUBLICCLOUD AZUREUSGOVERNMENTCLOUD AZUREGERMANCLOUD AZURECHINACLOUD] (default "AZUREPUBLICCLOUD")
+* **version** - shows current tool version
+* **managed-identity-id** - Uses user managed identities (accepts resource id or client id)
+* **use-system-managed-identity** - Uses system managed identity
+  
 ## Exit Error Codes
 | Error                      | Exit Code |
 |----------------------------|-----------|
@@ -50,6 +53,10 @@ Finally, if the certificate from is new, it then extracts the certificate and pr
 | ERR_CREATE_PEM_FILE        | 8         |
 | ERR_X509_THUMBPRINT        | 9         |
 | ERR_OUTPUTFOLDER_NOT_FOUND | 10        |
+| ERR_INVALID_AZURE_ENVIRONMENT | 11 |
+| ERR_CREDENTIALS | 12 |
+| ERR_INVALID_CREDENTIAL_ARGS | 13 |
+
 
 # Related Information
 * [Managed Identities For Azure Resources](https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview)
