@@ -52,7 +52,7 @@ var (
 	managedIdentityId        = flag.String("managed-identity-id", "", "uses user managed identities (accepts resource id or client id)")
 	useSystemManagedIdentity = flag.Bool("use-system-managed-identity", false, "uses system managed identity")
 	exitCode                 = 0
-	version                  = "1.1.0"
+	version                  = "1.1.1"
 	stdout                   = log.New(os.Stdout, "", log.LstdFlags)
 	stderr                   = log.New(os.Stderr, "", log.LstdFlags)
 )
