@@ -44,13 +44,15 @@ const (
 )
 
 var (
+	validEnvironments        = []string{"AZUREPUBLICCLOUD", "AZUREUSGOVERNMENTCLOUD", "AZUREGERMANCLOUD", "AZURECHINACLOUD"}
 	certURL                  = flag.String("certurl", "", "certificate URL, e.g. \"https://mykeyvault.vault.azure.net/mycertificate\"")
 	outputFolder             = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
+	environment              = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
 	cmdlineversion           = flag.Bool("version", false, "shows current tool version")
 	managedIdentityId        = flag.String("managed-identity-id", "", "uses user managed identities (accepts resource id or client id)")
 	useSystemManagedIdentity = flag.Bool("use-system-managed-identity", false, "uses system managed identity")
 	exitCode                 = 0
-	version                  = "1.1.3"
+	version                  = "1.1.1"
 	stdout                   = log.New(os.Stdout, "", log.LstdFlags)
 	stderr                   = log.New(os.Stderr, "", log.LstdFlags)
 )
@@ -83,6 +85,14 @@ func main() {
 		return
 	}
 
+	// Checks if valid cloud environment was passed
+	_, found := utils.FindInSlice(validEnvironments, strings.ToUpper(*environment))
+	if !found {
+		utils.ConsoleOutput(fmt.Sprintf("<error> invalid azure environment (%v), valid environments are: %v", *environment, validEnvironments), stderr)
+		exitCode = ERR_INVALID_AZURE_ENVIRONMENT
+		return
+	}
+
 	// Checks if both user managed identity and system managed identities were set
 	if *managedIdentityId != "" && *useSystemManagedIdentity {
 		utils.ConsoleOutput("<error> invalid authentication options, user and system assigned managed identities arguments cannot be used at the same time", stderr)
@@ -103,6 +113,7 @@ func main() {
 
 	utils.ConsoleOutput(fmt.Sprintf("Output Folder: %v", *outputFolder), stdout)
 	utils.ConsoleOutput(fmt.Sprintf("Using Certificate URL: %v", *certURL), stdout)
+	utils.ConsoleOutput(fmt.Sprintf("Environment: %v", *environment), stdout)
 
 	utils.ConsoleOutput("Checking if this session needs to rely on AD Workload Identity webhook", stdout)
 	var cred azcore.TokenCredential
