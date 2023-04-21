@@ -34,7 +34,7 @@ Finally, if the certificate from is new, it then extracts the certificate and pr
 
 ## Parameters
 
-* **certulr** - This is the KeyVault URL followed by the certificate name. E.g. https://pmc-anf-release-kv.vault.azure.net/vm-cert
+* **certulr** - This is the KeyVault URL followed by the certificate name. E.g. https://mykeyvault.vault.azure.net/vm-cert
 * **outputfolder** - Folder where the PEM file with the Certificate and its Private Key will be saved, it must exist beforehand, the tool will not create it and will also not manage permissions on the files
 * **version** - shows current tool version
 * **managed-identity-id** - Uses user managed identities (accepts resource id or client id)
