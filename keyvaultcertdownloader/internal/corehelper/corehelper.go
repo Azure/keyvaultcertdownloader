@@ -21,11 +21,10 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azcertificates"
-	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azsecrets"
+	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azcertificates"
+	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/confidential"
 	gpkcs12 "software.sslmate.com/src/go-pkcs12"
 )
@@ -187,7 +186,7 @@ func NewClientAssertionCredential(tenantID, clientID, authorityHost, file string
 		},
 	)
 
-	client, err := confidential.New(clientID, cred, confidential.WithAuthority(fmt.Sprintf("%s%s/oauth2/token", authorityHost, tenantID)))
+	client, err := confidential.New(fmt.Sprintf("%s%s/oauth2/token", authorityHost, tenantID), clientID, cred)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create confidential client: %w", err)
 	}
@@ -295,89 +294,6 @@ func GetTokenCredentials(managedIdentityId string, useSystemManagedIdentity bool
 	return cred, nil
 }
 
-func getCloudConfiguration(environment, cloudConfigFile string) (cloud.Configuration, error) {
-	cloudConfig := cloud.Configuration{}
-
-	if environment == "AZUREUSGOVERNMENTCLOUD" {
-		cloudConfig = cloud.AzureGovernment
-	} else if environment == "AZURECHINACLOUD" {
-		cloudConfig = cloud.AzureChina
-	} else if environment == "CUSTOMCLOUD" {
-
-		// This is the mapping between values expected on cloud.Configuration
-		// and the output of az cloud show -n AzureCloud -o json
-		//
-		// ActiveDirectoryAuthorityHost = endpoints.activeDirectory (e.g."https://login.microsoftonline.us")
-		// Endpoint = endpoints.resourceManager (e.g. "https://management.usgovcloudapi.net")
-		// Audience = endpoints.activeDirectoryResourceId (e.g. "https://management.core.usgovcloudapi.net")
-
-		if cloudConfigFile != "" {
-			cloudInfo, err := utils.ImportCloudConfigJson(cloudConfigFile)
-			if err != nil {
-				return cloud.Configuration{}, fmt.Errorf("an error ocurred while importing cloud config information from json file: %v", err)
-			}
-
-			cloudConfig = cloud.Configuration{
-				ActiveDirectoryAuthorityHost: cloudInfo.Endpoints.ActiveDirectoryAuthorityHost,
-				Services: map[cloud.ServiceName]cloud.ServiceConfiguration{
-					cloud.ResourceManager: {
-						Endpoint: cloudInfo.Endpoints.ResourceManagerEndpoint,
-						Audience: cloudInfo.Endpoints.ResourceManagerEndpoint,
-					},
-				},
-			}
-		}
-
-	} else {
-		cloudConfig = cloud.AzurePublic
-	}
-
-	return cloudConfig, nil
-}
-
-// GetCertsClient returns a certs client
-func GetCertsClient(keyVaultUrl, environment, cloudConfigFile string, cred azcore.TokenCredential) (azcertificates.Client, error) {
-	cloudConfig, err := getCloudConfiguration(environment, cloudConfigFile)
-	if err != nil {
-		return azcertificates.Client{}, fmt.Errorf("failed to create cloudConfig object: %v\n", err)
-	}
-
-	options := azcertificates.ClientOptions{
-		ClientOptions: azcore.ClientOptions{
-			Cloud: cloudConfig,
-		},
-	}
-
-	azcertsClient, err := azcertificates.NewClient(keyVaultUrl, cred, &options)
-	if err != nil {
-		return azcertificates.Client{}, fmt.Errorf("failed to create azcerts client: %v\n", err)
-	}
-
-	return *azcertsClient, nil
-}
-
-// GetSecretsClient returns an azsecrets.Client
-func GetSecretsClient(keyVaultUrl, environment, cloudConfigFile string, cred azcore.TokenCredential) (azsecrets.Client, error) {
-
-	cloudConfig, err := getCloudConfiguration(environment, cloudConfigFile)
-	if err != nil {
-		return azsecrets.Client{}, fmt.Errorf("failed to create cloudConfig object: %v\n", err)
-	}
-
-	options := azsecrets.ClientOptions{
-		ClientOptions: azcore.ClientOptions{
-			Cloud: cloudConfig,
-		},
-	}
-
-	azsecretsClient, err := azsecrets.NewClient(keyVaultUrl, cred, &options)
-	if err != nil {
-		return azsecrets.Client{}, fmt.Errorf("failed to create azsecrets client: %v\n", err)
-	}
-
-	return *azsecretsClient, nil
-}
-
 //
 // Keyvault SDK related functions
 //
@@ -408,4 +324,24 @@ func GetAKVCertThumbprint(cntx context.Context, client *azcertificates.Client, c
 	}
 
 	return string(certBundle.X509Thumbprint), nil
+}
+
+// GetCertsClient returns a certs client
+func GetCertsClient(keyVaultUrl string, cred azcore.TokenCredential) (azcertificates.Client, error) {
+	azcertsClient, err := azcertificates.NewClient(keyVaultUrl, cred, nil)
+	if err != nil {
+		return azcertificates.Client{}, fmt.Errorf("failed to create azcerts client: %v\n", err)
+	}
+
+	return *azcertsClient, nil
+}
+
+// GetSecretsClient returns an azsecrets.Client
+func GetSecretsClient(keyVaultUrl string, cred azcore.TokenCredential) (azsecrets.Client, error) {
+	azsecretsClient, err := azsecrets.NewClient(keyVaultUrl, cred, nil)
+	if err != nil {
+		return azsecrets.Client{}, fmt.Errorf("failed to create azsecrets client: %v\n", err)
+	}
+
+	return *azsecretsClient, nil
 }

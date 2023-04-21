@@ -23,16 +23,13 @@ import (
 )
 
 var (
-	validEnvironments        = []string{"AZUREPUBLICCLOUD", "AZUREUSGOVERNMENTCLOUD", "AZURECHINACLOUD", "CUSTOMCLOUD"}
 	certURL                  = flag.String("certurl", "", "certificate URL, e.g. \"https://mykeyvault.vault.azure.net/mycertificate\"")
 	outputFolder             = flag.String("outputfolder", "", "folder where PEM file with certificate and private key will be saved")
-	environment              = flag.String("environment", "AZUREPUBLICCLOUD", fmt.Sprintf("valid azure cloud environments: %v", validEnvironments))
 	cmdlineversion           = flag.Bool("version", false, "shows current tool version")
 	managedIdentityId        = flag.String("managed-identity-id", "", "uses user managed identities (accepts resource id or client id)")
 	useSystemManagedIdentity = flag.Bool("use-system-managed-identity", false, "uses system managed identity")
-	cloudConfigFile          = flag.String("custom-cloudconfig-file", "", "passes a custom cloud configuration to the sdk for use with non-public azure clouds, only used for CUSTOMCLOUD environment")
 	exitCode                 = 0
-	version                  = "1.5.0"
+	version                  = "1.1.4"
 )
 
 func main() {
@@ -63,42 +60,11 @@ func main() {
 		return
 	}
 
-	// Checks if valid cloud environment was passed
-	_, found := utils.FindInSlice(validEnvironments, strings.ToUpper(*environment))
-	if !found {
-		utils.ConsoleOutput(fmt.Sprintf("<error> invalid azure environment (%v), valid environments are: %v", *environment, validEnvironments), corehelper.Stderr)
-		exitCode = corehelper.ERR_INVALID_AZURE_ENVIRONMENT
-		return
-	}
-
 	// Checks if both user managed identity and system managed identities were set
 	if *managedIdentityId != "" && *useSystemManagedIdentity {
 		utils.ConsoleOutput("<error> invalid authentication options, user and system assigned managed identities arguments cannot be used at the same time", corehelper.Stderr)
 		exitCode = corehelper.ERR_INVALID_CREDENTIAL_ARGS
 		return
-	}
-
-	// Checks if custom cloud file is only passed when custom cloud option is used
-	if strings.ToUpper(*environment) != "CUSTOMCLOUD" && *cloudConfigFile != "" {
-		utils.ConsoleOutput("<error> cloud config file is only supported for custom cloud", corehelper.Stderr)
-		exitCode = corehelper.ERR_CLOUD_CONFIG_FILE_ONLY_FOR_CUSTOM_CLOUD
-		return
-	}
-
-	// Checks if cloud config file is passed when using custom cloud
-	if strings.ToUpper(*environment) == "CUSTOMCLOUD" && *cloudConfigFile == "" {
-		utils.ConsoleOutput("<error> cloud config file is required for custom cloud", corehelper.Stderr)
-		exitCode = corehelper.ERR_CLOUD_CONFIG_FILE_REQUIRED_FOR_CUSTOM_CLOUD
-		return
-	}
-
-	if strings.ToUpper(*environment) == "CUSTOMCLOUD" && *cloudConfigFile != "" {
-		// Checks if custom cloud config file exists
-		if _, err := os.Stat(*cloudConfigFile); os.IsNotExist(err) {
-			utils.ConsoleOutput("<error> cloud config file not found", corehelper.Stderr)
-			exitCode = corehelper.ERR_CLOUD_CONFIG_FILE_NOT_FOUND
-			return
-		}
 	}
 
 	// Creates URL object
@@ -115,7 +81,6 @@ func main() {
 
 	utils.ConsoleOutput(fmt.Sprintf("Output Folder: %v", *outputFolder), corehelper.Stdout)
 	utils.ConsoleOutput(fmt.Sprintf("Using Certificate URL: %v", *certURL), corehelper.Stdout)
-	utils.ConsoleOutput(fmt.Sprintf("Environment: %v", *environment), corehelper.Stdout)
 
 	utils.ConsoleOutput("Checking if this session needs to rely on AD Workload Identity webhook", corehelper.Stdout)
 
@@ -129,14 +94,14 @@ func main() {
 
 	// Creating clients
 	utils.ConsoleOutput("Creating clients", corehelper.Stdout)
-	azsecretsClient, err := corehelper.GetSecretsClient(keyVaultUrl, *environment, *cloudConfigFile, cred)
+	azsecretsClient, err := corehelper.GetSecretsClient(keyVaultUrl, cred)
 	if err != nil {
 		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azsecrets client: %v\n", err), corehelper.Stderr)
 		exitCode = corehelper.ERR_CREDENTIALS
 		return
 	}
 
-	azcertsClient, err := corehelper.GetCertsClient(keyVaultUrl, *environment, *cloudConfigFile, cred)
+	azcertsClient, err := corehelper.GetCertsClient(keyVaultUrl, cred)
 	if err != nil {
 		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azcertificates client: %v\n", err), corehelper.Stderr)
 		exitCode = corehelper.ERR_CREDENTIALS
