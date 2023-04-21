@@ -14,33 +14,12 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"strings"
 
 	"internal/corehelper"
 	"internal/utils"
-
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azcertificates"
-	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azsecrets"
-)
-
-const (
-	ERR_AUTHORIZER                = 2
-	ERR_INVALID_ARGUMENT          = 3
-	ERR_INVALID_URL               = 4
-	ERR_GET_AKV_CERT_SECRET       = 5
-	ERR_GET_PEM_PRIVATE_KEY       = 6
-	ERR_GET_PEM_CERTIFICATE       = 7
-	ERR_CREATE_PEM_FILE           = 8
-	ERR_X509_THUMBPRINT           = 9
-	ERR_OUTPUTFOLDER_NOT_FOUND    = 10
-	ERR_INVALID_AZURE_ENVIRONMENT = 11
-	ERR_CREDENTIALS               = 12
-	ERR_INVALID_CREDENTIAL_ARGS   = 13
 )
 
 var (
@@ -50,9 +29,7 @@ var (
 	managedIdentityId        = flag.String("managed-identity-id", "", "uses user managed identities (accepts resource id or client id)")
 	useSystemManagedIdentity = flag.Bool("use-system-managed-identity", false, "uses system managed identity")
 	exitCode                 = 0
-	version                  = "1.1.3"
-	stdout                   = log.New(os.Stdout, "", log.LstdFlags)
-	stderr                   = log.New(os.Stderr, "", log.LstdFlags)
+	version                  = "1.1.4"
 )
 
 func main() {
@@ -64,8 +41,8 @@ func main() {
 	flag.Parse()
 
 	if len(os.Args[1:]) < 1 {
-		utils.ConsoleOutput(fmt.Sprintf("<error> invalid number of arguments, please execute %v -h or --help for more information", os.Args[0]), stderr)
-		exitCode = ERR_INVALID_ARGUMENT
+		utils.ConsoleOutput(fmt.Sprintf("<error> invalid number of arguments, please execute %v -h or --help for more information", os.Args[0]), corehelper.Stderr)
+		exitCode = corehelper.ERR_INVALID_ARGUMENT
 		return
 	}
 
@@ -78,154 +55,89 @@ func main() {
 
 	// Checks if outputfolder exists
 	if _, err := os.Stat(*outputFolder); err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> output folder %v not found", *outputFolder), stderr)
-		exitCode = ERR_OUTPUTFOLDER_NOT_FOUND
+		utils.ConsoleOutput(fmt.Sprintf("<error> output folder %v not found", *outputFolder), corehelper.Stderr)
+		exitCode = corehelper.ERR_OUTPUTFOLDER_NOT_FOUND
 		return
 	}
 
 	// Checks if both user managed identity and system managed identities were set
 	if *managedIdentityId != "" && *useSystemManagedIdentity {
-		utils.ConsoleOutput("<error> invalid authentication options, user and system assigned managed identities arguments cannot be used at the same time", stderr)
-		exitCode = ERR_INVALID_CREDENTIAL_ARGS
+		utils.ConsoleOutput("<error> invalid authentication options, user and system assigned managed identities arguments cannot be used at the same time", corehelper.Stderr)
+		exitCode = corehelper.ERR_INVALID_CREDENTIAL_ARGS
 		return
 	}
 
 	// Creates URL object
 	u, err := url.Parse(*certURL)
 	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> an error occurred parsing cert url: %v", err), stderr)
-		exitCode = ERR_INVALID_URL
+		utils.ConsoleOutput(fmt.Sprintf("<error> an error occurred parsing cert url: %v", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_INVALID_URL
 		return
 	}
+
 	keyVaultUrl := fmt.Sprintf("%v://%v/", u.Scheme, u.Hostname())
 
 	utils.PrintHeader(fmt.Sprintf("keyvaultcertdownloader - Downloads a certificate from Azure KeyVault saving as PEM file - v%v", version))
 
-	utils.ConsoleOutput(fmt.Sprintf("Output Folder: %v", *outputFolder), stdout)
-	utils.ConsoleOutput(fmt.Sprintf("Using Certificate URL: %v", *certURL), stdout)
+	utils.ConsoleOutput(fmt.Sprintf("Output Folder: %v", *outputFolder), corehelper.Stdout)
+	utils.ConsoleOutput(fmt.Sprintf("Using Certificate URL: %v", *certURL), corehelper.Stdout)
 
-	utils.ConsoleOutput("Checking if this session needs to rely on AD Workload Identity webhook", stdout)
-	var cred azcore.TokenCredential
+	utils.ConsoleOutput("Checking if this session needs to rely on AD Workload Identity webhook", corehelper.Stdout)
 
-	tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
-	if tokenFilePath == "" {
-		// Not running within a container with azwi webhook configured
-		utils.ConsoleOutput("Obtaining credentials", stdout)
-
-		if *managedIdentityId == "" && !*useSystemManagedIdentity {
-			cred, err = azidentity.NewDefaultAzureCredential(nil)
-		} else if *useSystemManagedIdentity {
-			cred, err = azidentity.NewManagedIdentityCredential(nil)
-		} else if *managedIdentityId != "" {
-			opts := azidentity.ManagedIdentityCredentialOptions{}
-
-			if strings.Contains(*managedIdentityId, "/") {
-				opts = azidentity.ManagedIdentityCredentialOptions{
-					ID: azidentity.ResourceID(*managedIdentityId),
-				}
-			} else {
-				opts = azidentity.ManagedIdentityCredentialOptions{
-					ID: azidentity.ClientID(*managedIdentityId),
-				}
-			}
-
-			cred, err = azidentity.NewManagedIdentityCredential(&opts)
-		} else {
-			utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
-			exitCode = ERR_CREDENTIALS
-			return
-		}
-
-		if err != nil {
-			utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
-			exitCode = ERR_CREDENTIALS
-			return
-		}
-	} else {
-
-		// NOTE: following block is based on azure workload identity sample:
-		//       https://github.dev/Azure/azure-workload-identity/blob/main/examples/msal-net/akvdotnet/TokenCredential.cs
-		//
-
-		// Azure AD Workload Identity webhook will inject the following env vars
-		// 	AZURE_CLIENT_ID with the clientID set in the service account annotation
-		// 	AZURE_TENANT_ID with the tenantID set in the service account annotation. If not defined, then
-		// 	the tenantID provided via azure-wi-webhook-config for the webhook will be used.
-		// 	AZURE_FEDERATED_TOKEN_FILE is the service account token path
-		// 	AZURE_AUTHORITY_HOST is the AAD authority hostname
-		clientID := os.Getenv("AZURE_CLIENT_ID")
-		tenantID := os.Getenv("AZURE_TENANT_ID")
-		tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
-		authorityHost := os.Getenv("AZURE_AUTHORITY_HOST")
-
-		if clientID == "" {
-			utils.ConsoleOutput("AZURE_CLIENT_ID environment variable is not set", stderr)
-			exitCode = ERR_CREDENTIALS
-			return
-		}
-		if tenantID == "" {
-			utils.ConsoleOutput("AZURE_TENANT_ID environment variable is not set", stderr)
-			exitCode = ERR_CREDENTIALS
-			return
-		}
-		if authorityHost == "" {
-			utils.ConsoleOutput("AZURE_AUTHORITY_HOST environment variable is not set", stderr)
-			exitCode = ERR_CREDENTIALS
-			return
-		}
-
-		cred, err = corehelper.NewClientAssertionCredential(tenantID, clientID, authorityHost, tokenFilePath, nil)
-		if err != nil {
-			utils.ConsoleOutput(fmt.Sprintf("<error> failed to create client assertion credential: %v\n", err), stderr)
-			exitCode = ERR_CREDENTIALS
-			return
-		}
-	}
-
-	utils.ConsoleOutput("Creating clients", stdout)
-	azsecretsClient, err := azsecrets.NewClient(keyVaultUrl, cred, nil)
+	// Getting token credentials to be used by various clients
+	cred, err := corehelper.GetTokenCredentials(*managedIdentityId, *useSystemManagedIdentity)
 	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azsecrets client: %v\n", err), stderr)
-		exitCode = ERR_CREDENTIALS
-		return
-	}
-	azcertsClient, err := azcertificates.NewClient(keyVaultUrl, cred, nil)
-	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azcertificates client: %v\n", err), stderr)
-		exitCode = ERR_CREDENTIALS
+		utils.ConsoleOutput(fmt.Sprintf("<error> failed to obtain token credentials: %v\n", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_CREDENTIALS
 		return
 	}
 
-	utils.ConsoleOutput("Getting certificate thumbprint", stdout)
-	x509Thumbprint, err := corehelper.GetAKVCertThumbprint(cntx, azcertsClient, *u)
+	// Creating clients
+	utils.ConsoleOutput("Creating clients", corehelper.Stdout)
+	azsecretsClient, err := corehelper.GetSecretsClient(keyVaultUrl, cred)
 	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
-		exitCode = ERR_X509_THUMBPRINT
+		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azsecrets client: %v\n", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_CREDENTIALS
+		return
+	}
+
+	azcertsClient, err := corehelper.GetCertsClient(keyVaultUrl, cred)
+	if err != nil {
+		utils.ConsoleOutput(fmt.Sprintf("<error> failed to create azcertificates client: %v\n", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_CREDENTIALS
+		return
+	}
+
+	utils.ConsoleOutput("Getting certificate thumbprint", corehelper.Stdout)
+	x509Thumbprint, err := corehelper.GetAKVCertThumbprint(cntx, &azcertsClient, *u)
+	if err != nil {
+		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_X509_THUMBPRINT
 		return
 	}
 
 	hexThumbprint := strings.ToUpper(hex.EncodeToString([]byte(x509Thumbprint)))
 	kvCertName := strings.Replace(u.Path, "/", "", 1)
 	pemFileName := fmt.Sprintf("%v/%v-%v.PEM", *outputFolder, kvCertName, hexThumbprint)
-	utils.ConsoleOutput(fmt.Sprintf("PEM filename: %v", pemFileName), stdout)
+	utils.ConsoleOutput(fmt.Sprintf("PEM filename: %v", pemFileName), corehelper.Stdout)
 
 	// Checks if certificate needs to be downloaded
 	if _, err := os.Stat(pemFileName); err == nil {
-		utils.ConsoleOutput(fmt.Sprintf("Certificate %v in key vault is the same as the one already downloaded, exiting...", kvCertName), stdout)
+		utils.ConsoleOutput(fmt.Sprintf("Certificate %v in key vault is the same as the one already downloaded, exiting...", kvCertName), corehelper.Stdout)
 		exitCode = 0
 		return
 	}
 
 	// Get cert as secret
-	utils.ConsoleOutput("Getting certificate as secret", stdout)
-	certAKV, err := corehelper.GetAKVCertificate(cntx, azsecretsClient, *u)
+	utils.ConsoleOutput("Getting certificate as secret", corehelper.Stdout)
+	certAKV, err := corehelper.GetAKVCertificate(cntx, &azsecretsClient, *u)
 	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> unable to get certificate: %v\n", err), stderr)
-		exitCode = ERR_GET_AKV_CERT_SECRET
+		utils.ConsoleOutput(fmt.Sprintf("<error> unable to get certificate: %v\n", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_GET_AKV_CERT_SECRET
 		return
 	}
 
-	utils.ConsoleOutput(fmt.Sprintf("Cert format: %v", *certAKV.ContentType), stdout)
+	utils.ConsoleOutput(fmt.Sprintf("Cert format: %v", *certAKV.ContentType), corehelper.Stdout)
 
 	// Getting PEM Blocks
 	var blocks interface{}
@@ -237,22 +149,22 @@ func main() {
 
 	privateKey, err := corehelper.GetPrivateKeyFromPEMBlocks(blocks)
 	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
-		exitCode = ERR_GET_PEM_PRIVATE_KEY
+		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_GET_PEM_PRIVATE_KEY
 		return
 	}
 
 	certificate, err := corehelper.GetCertificateFromPEMBLocks(blocks)
 	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
-		exitCode = ERR_GET_PEM_CERTIFICATE
+		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_GET_PEM_CERTIFICATE
 		return
 	}
 
 	err = corehelper.WritePEMfile(pemFileName, certificate, privateKey)
 	if err != nil {
-		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), stderr)
-		exitCode = ERR_CREATE_PEM_FILE
+		utils.ConsoleOutput(fmt.Sprintf("<error> %v\n", err), corehelper.Stderr)
+		exitCode = corehelper.ERR_CREATE_PEM_FILE
 		return
 	}
 }
@@ -260,7 +172,7 @@ func main() {
 func exit(cntx context.Context, exitCode int) {
 	if exitCode == 0 {
 		if !*cmdlineversion {
-			utils.ConsoleOutput("Execution successfully completed", stdout)
+			utils.ConsoleOutput("Execution successfully completed", corehelper.Stdout)
 		}
 	}
 }

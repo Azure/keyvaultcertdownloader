@@ -12,9 +12,15 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 
 	"internal/models"
+)
+
+var (
+	stdout = log.New(os.Stdout, "", log.LstdFlags)
+	stderr = log.New(os.Stderr, "", log.LstdFlags)
 )
 
 // PrintHeader prints a header message
@@ -59,4 +65,18 @@ func FindInSlice(slice []string, val string) (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// ImportCloudConfigJson imports the cloud config json file and returns a struct
+func ImportCloudConfigJson(path string) (*models.CloudConfigInfo, error) {
+	infoJSON, err := ioutil.ReadFile(path)
+	if err != nil {
+		ConsoleOutput(fmt.Sprintf("failed to read file: %v", err), stderr)
+		return &models.CloudConfigInfo{}, err
+	}
+
+	// Converting json to struct
+	var info models.CloudConfigInfo
+	json.Unmarshal(infoJSON, &info)
+	return &info, nil
 }

@@ -25,3 +25,15 @@ type AzureBasicInfo struct {
 	ResourceManagerEndpointURL *string
 	ManagementEndpointURL      *string
 }
+
+// Endpoints object definition
+type Endpoints struct {
+	ActiveDirectoryAuthorityHost string `json:"activeDirectory"`
+	ResourceManagerEndpoint      string `json:"resourceManager"`
+	ResourceManagerAudience      string `json:"activeDirectoryResourceId"`
+}
+
+// CloudConfigInfo object definition, used to map the output of az cloud show -n <cloud name> -o json
+type CloudConfigInfo struct {
+	Endpoints Endpoints `json:"endpoints"`
+}

@@ -1,3 +1,4 @@
 anf-*.PEM
 keyvaultcertdownloader
 keyvaultcertdownloader.exe
+.vscode

@@ -13,6 +13,8 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"internal/utils"
+	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -20,10 +22,34 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
-	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azcertificates"
-	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azsecrets"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azcertificates"
+	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/confidential"
 	gpkcs12 "software.sslmate.com/src/go-pkcs12"
+)
+
+const (
+	ERR_AUTHORIZER                                  = 2
+	ERR_INVALID_ARGUMENT                            = 3
+	ERR_INVALID_URL                                 = 4
+	ERR_GET_AKV_CERT_SECRET                         = 5
+	ERR_GET_PEM_PRIVATE_KEY                         = 6
+	ERR_GET_PEM_CERTIFICATE                         = 7
+	ERR_CREATE_PEM_FILE                             = 8
+	ERR_X509_THUMBPRINT                             = 9
+	ERR_OUTPUTFOLDER_NOT_FOUND                      = 10
+	ERR_INVALID_AZURE_ENVIRONMENT                   = 11
+	ERR_CREDENTIALS                                 = 12
+	ERR_INVALID_CREDENTIAL_ARGS                     = 13
+	ERR_CLOUD_CONFIG_FILE_ONLY_FOR_CUSTOM_CLOUD     = 180
+	ERR_CLOUD_CONFIG_FILE_NOT_FOUND                 = 181
+	ERR_CLOUD_CONFIG_FILE_REQUIRED_FOR_CUSTOM_CLOUD = 182
+)
+
+var (
+	Stdout = log.New(os.Stdout, "", log.LstdFlags)
+	Stderr = log.New(os.Stderr, "", log.LstdFlags)
 )
 
 // GetBlocksFromPEM - Gets decoded data block from PEM
@@ -130,7 +156,7 @@ func GetPrivateKeyFromPEMBlocks(blocks interface{}) (privateKey interface{}, err
 }
 
 //
-//!SECTION - Azcore SDK related functions
+// Azcore SDK related functions
 // Source: https://github.com/Azure/azure-workload-identity/tree/main/examples
 //
 
@@ -160,7 +186,7 @@ func NewClientAssertionCredential(tenantID, clientID, authorityHost, file string
 		},
 	)
 
-	client, err := confidential.New(clientID, cred, confidential.WithAuthority(fmt.Sprintf("%s%s/oauth2/token", authorityHost, tenantID)))
+	client, err := confidential.New(fmt.Sprintf("%s%s/oauth2/token", authorityHost, tenantID), clientID, cred)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create confidential client: %w", err)
 	}
@@ -197,8 +223,79 @@ func (c *clientAssertionCredential) getAssertion(context.Context) (string, error
 	return c.assertion, nil
 }
 
+func GetTokenCredentials(managedIdentityId string, useSystemManagedIdentity bool) (azcore.TokenCredential, error) {
+	var cred azcore.TokenCredential
+	var err error
+
+	tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+	if tokenFilePath == "" {
+		// Not running within a container with azwi webhook configured
+		utils.ConsoleOutput("Obtaining credentials", Stdout)
+
+		if managedIdentityId == "" && !useSystemManagedIdentity {
+			cred, err = azidentity.NewDefaultAzureCredential(nil)
+		} else if useSystemManagedIdentity {
+			cred, err = azidentity.NewManagedIdentityCredential(nil)
+		} else if managedIdentityId != "" {
+			opts := azidentity.ManagedIdentityCredentialOptions{}
+
+			if strings.Contains(managedIdentityId, "/") {
+				opts = azidentity.ManagedIdentityCredentialOptions{
+					ID: azidentity.ResourceID(managedIdentityId),
+				}
+			} else {
+				opts = azidentity.ManagedIdentityCredentialOptions{
+					ID: azidentity.ClientID(managedIdentityId),
+				}
+			}
+
+			cred, err = azidentity.NewManagedIdentityCredential(&opts)
+		} else {
+			return nil, fmt.Errorf("authentication method not supported")
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("an error ocurred while obtaining : %v", err)
+		}
+	} else {
+
+		// NOTE: following block is based on azure workload identity sample:
+		//       https://github.dev/Azure/azure-workload-identity/blob/main/examples/msal-net/akvdotnet/TokenCredential.cs
+		//
+
+		// Azure AD Workload Identity webhook will inject the following env vars
+		// 	AZURE_CLIENT_ID with the clientID set in the service account annotation
+		// 	AZURE_TENANT_ID with the tenantID set in the service account annotation. If not defined, then
+		// 	the tenantID provided via azure-wi-webhook-config for the webhook will be used.
+		// 	AZURE_FEDERATED_TOKEN_FILE is the service account token path
+		// 	AZURE_AUTHORITY_HOST is the AAD authority hostname
+		clientID := os.Getenv("AZURE_CLIENT_ID")
+		tenantID := os.Getenv("AZURE_TENANT_ID")
+		tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+		authorityHost := os.Getenv("AZURE_AUTHORITY_HOST")
+
+		if clientID == "" {
+			return nil, fmt.Errorf("an error ocurred: AZURE_CLIENT_ID environment variable is not set")
+		}
+		if tenantID == "" {
+			return nil, fmt.Errorf("an error ocurred: AZURE_TENANT_ID environment variable is not set")
+		}
+		if authorityHost == "" {
+			return nil, fmt.Errorf("an error ocurred: AZURE_AUTHORITY_HOST environment variable is not set")
+		}
+
+		cred, err = NewClientAssertionCredential(tenantID, clientID, authorityHost, tokenFilePath, nil)
+		if err != nil {
+			utils.ConsoleOutput(fmt.Sprintf("<error> failed to create client assertion credential: %v\n", err), Stderr)
+			return nil, fmt.Errorf("an error ocurred: AZURE_CLIENT_ID environment variable is not set")
+		}
+	}
+
+	return cred, nil
+}
+
 //
-//!SECTION - Keyvault SDK related functions
+// Keyvault SDK related functions
 //
 
 func getAKVCertificateBundle(cntx context.Context, client *azcertificates.Client, certURL url.URL) (azcertificates.CertificateBundle, error) {
@@ -227,4 +324,24 @@ func GetAKVCertThumbprint(cntx context.Context, client *azcertificates.Client, c
 	}
 
 	return string(certBundle.X509Thumbprint), nil
+}
+
+// GetCertsClient returns a certs client
+func GetCertsClient(keyVaultUrl string, cred azcore.TokenCredential) (azcertificates.Client, error) {
+	azcertsClient, err := azcertificates.NewClient(keyVaultUrl, cred, nil)
+	if err != nil {
+		return azcertificates.Client{}, fmt.Errorf("failed to create azcerts client: %v\n", err)
+	}
+
+	return *azcertsClient, nil
+}
+
+// GetSecretsClient returns an azsecrets.Client
+func GetSecretsClient(keyVaultUrl string, cred azcore.TokenCredential) (azsecrets.Client, error) {
+	azsecretsClient, err := azsecrets.NewClient(keyVaultUrl, cred, nil)
+	if err != nil {
+		return azsecrets.Client{}, fmt.Errorf("failed to create azsecrets client: %v\n", err)
+	}
+
+	return *azsecretsClient, nil
 }
