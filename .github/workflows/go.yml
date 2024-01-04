@@ -23,10 +23,11 @@ jobs:
 
     - name: Display directory structure
       run: |
+        tree
         pwd
         ls -al
 
     - name: Build
-      working-directory: ./keyvaultcertdownloader/keyvaultcertdownloader
+      working-directory: keyvaultcertdownloader
       run: go build -v
 
