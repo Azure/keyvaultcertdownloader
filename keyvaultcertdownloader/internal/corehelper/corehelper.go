@@ -298,22 +298,22 @@ func GetTokenCredentials(managedIdentityId string, useSystemManagedIdentity bool
 // Keyvault SDK related functions
 //
 
-func getAKVCertificateBundle(cntx context.Context, client *azcertificates.Client, certURL url.URL) (azcertificates.CertificateBundle, error) {
+func getAKVCertificateBundle(cntx context.Context, client *azcertificates.Client, certURL url.URL) (azcertificates.Certificate, error) {
 	cert, err := client.GetCertificate(cntx, certURL.Path, "", nil)
 	if err != nil {
-		return azcertificates.CertificateBundle{}, err
+		return azcertificates.Certificate{}, err
 	}
 
-	return cert.CertificateBundle, nil
+	return cert.Certificate, nil
 }
 
 // GetAKVCertificate - Gets a certificate from AKV
-func GetAKVCertificate(cntx context.Context, client *azsecrets.Client, certURL url.URL) (azsecrets.SecretBundle, error) {
+func GetAKVCertificate(cntx context.Context, client *azsecrets.Client, certURL url.URL) (azsecrets.Secret, error) {
 	certSecret, err := client.GetSecret(cntx, certURL.Path, "", nil)
 	if err != nil {
-		return azsecrets.SecretBundle{}, err
+		return azsecrets.Secret{}, err
 	}
-	return certSecret.SecretBundle, nil
+	return certSecret.Secret, nil
 }
 
 // GetAKVCertThumbprint - Gets thumbprint from bundle
