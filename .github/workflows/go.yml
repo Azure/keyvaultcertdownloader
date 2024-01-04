@@ -27,5 +27,6 @@ jobs:
         ls -al
 
     - name: Build
+      working-directory: ./keyvaultcertdownloader/keyvaultcertdownloader
       run: go build -v
 
