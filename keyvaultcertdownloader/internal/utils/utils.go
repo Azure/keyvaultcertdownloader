@@ -10,7 +10,6 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"strings"
@@ -46,7 +45,7 @@ func Contains(array []string, element string) bool {
 
 // ReadAzureBasicInfoJSON reads the Azure Authentication json file json file and unmarshals it.
 func ReadAzureBasicInfoJSON(path string) (*models.AzureBasicInfo, error) {
-	infoJSON, err := ioutil.ReadFile(path)
+	infoJSON, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Sprintf("failed to read file: %v", err)
 		return &models.AzureBasicInfo{}, err
@@ -69,7 +68,7 @@ func FindInSlice(slice []string, val string) (int, bool) {
 
 // ImportCloudConfigJson imports the cloud config json file and returns a struct
 func ImportCloudConfigJson(path string) (*models.CloudConfigInfo, error) {
-	infoJSON, err := ioutil.ReadFile(path)
+	infoJSON, err := os.ReadFile(path)
 	if err != nil {
 		ConsoleOutput(fmt.Sprintf("failed to read file: %v", err), stderr)
 		return &models.CloudConfigInfo{}, err

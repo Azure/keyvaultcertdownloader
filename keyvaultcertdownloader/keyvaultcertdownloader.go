@@ -29,7 +29,7 @@ var (
 	managedIdentityId        = flag.String("managed-identity-id", "", "uses user managed identities (accepts resource id or client id)")
 	useSystemManagedIdentity = flag.Bool("use-system-managed-identity", false, "uses system managed identity")
 	exitCode                 = 0
-	version                  = "1.1.4"
+	version                  = "1.1.5"
 )
 
 func main() {

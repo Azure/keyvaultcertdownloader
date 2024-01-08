@@ -21,6 +21,13 @@ jobs:
       with:
         go-version: 1.19
 
+    - name: Display directory structure
+      run: |
+        tree
+        pwd
+        ls -al
+
     - name: Build
-      run: go build -v ./../keyvaultdownloader/.
+      working-directory: keyvaultcertdownloader
+      run: go build -v
 
