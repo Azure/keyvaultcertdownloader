@@ -1,0 +1,32 @@
+name: Build and Sign Binaries
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: '^1.16'
+
+    - name: Install gox
+      run: go get github.com/mitchellh/gox
+
+    - name: Build Binaries
+      run: |
+        gox -os="linux windows" -arch="amd64" -output="bin/{{.Dir}}_{{.OS}}_{{.Arch}}" ./...
+
+    - name: Sign Binaries
+      run: |
+        # Add your signing commands here
+        echo "Signing..."
