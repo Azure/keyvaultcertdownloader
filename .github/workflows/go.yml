@@ -21,18 +21,6 @@ jobs:
       with:
         go-version: 1.19
 
-    # - name: Install gox
-    #   run: go install github.com/mitchellh/gox
-
-    # - name: Build Binaries
-    #   run: |
-    #     gox -os="linux windows" -arch="amd64" -output="bin/{{.Dir}}_{{.OS}}_{{.Arch}}" ./...
-
-    # - name: Sign Binaries
-    #   run: |
-    #     # Add your signing commands here
-    #     echo "Signing..."
-
     - name: Build Windows
       working-directory: keyvaultcertdownloader
       run: GOOS=windows CGO_ENABLED=0 go build
@@ -40,6 +28,15 @@ jobs:
     - name: Build Linux
       working-directory: keyvaultcertdownloader
       run: GOOS=linux CGO_ENABLED=0 go build
+
+    - name: Getting tool version
+      working-directory: keyvaultcertdownloader
+      run: |
+        echo "TOOL_VERSION=$(cat ./keyvaultcertdownloader.go | grep version | grep "= \"" | awk -F= '{print $2}' | tr -d " " | tr -d "\"")" >> $GITHUB_ENV
+    
+    - name: Tool Version
+      run: |
+        echo "tool version is: ${{ env.TOOL_VERSION }}"
 
     - name: Display directory structure
       run: |
