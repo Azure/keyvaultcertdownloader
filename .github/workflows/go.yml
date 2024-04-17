@@ -21,7 +21,7 @@ jobs:
       with:
         go-version: 1.19
 
-    # - name: Build
-    #   working-directory: keyvaultcertdownloader
-    #   run: go build -v
+    - name: Build
+      working-directory: keyvaultcertdownloader
+      run: go build -v
 
