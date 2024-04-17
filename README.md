@@ -1,3 +1,5 @@
+> Note: The source code got moved internally, only releases will be available from GitHub.
+
 # keyvaultcertdownloader
 
 Source code for a tool that performs downloads managed certificates from KeyVault in PEM file format, these certificates can be self-signed or issued by an Azure KeyVault integrated CA (e.g. Digicert).
